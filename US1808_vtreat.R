@@ -1,5 +1,5 @@
 
-library(smbinning)
+# library(smbinning)
 library(vtreat)
 # This code is to deal with One hot encoding
 
@@ -9,10 +9,10 @@ summary(as.numeric(df$c01_ssn_first_name_count))
 table(df$d02_MaximumTradelinePrincipal)
 
 
-
+# hello git
 
 data_wd <- "W:/Analytics_Group_Files/US_files/2018_ProjectFiles/US1807_Unpack_Date_Set"
-
+data_wd <- "/Volumes/NO NAME/Concord"
 
 # --------------------------------------------------------- #
 # Product Universal Cleaning Code
@@ -123,7 +123,13 @@ C01 <- read.csv(file="new_c01_complete.csv",header = T)
 name_exc <- c("PortfolioID","Application_ID","ScoredDate")
 name_prefix <- "c01"
 df_c01 <- FUNC_Convention_Treatment(C01,att,name_exc,name_prefix)
+
+#----
+df_c01$sys_ApplicationDate <- as.Date(as.character(df_c01$ScoredDate))
+df_c01$ScoredDate <- NULL
 save(df_c01,file="df_c01.rda")
+
+
 
 C06
 
@@ -150,8 +156,6 @@ colnames(C01)
 # C01 Cleaning
 setwd(data_wd)
 df_c01 = get(load(file="df_c01.rda"))
-setwd(data_wd)
-
 
 # C01 Data Cleaning Series
 FUNC_C01_Date_To_Days <- function(data){
@@ -181,12 +185,12 @@ FUNC_C01_Routing_Number <- function(data){
   # Args: This function will change the routing number to it's full length
   
   data$c01_bank_routing_number <- as.character(data$c01_bank_routing_number)
-  data$c01.bank_routing_number <- sapply(data$c01_bank_routing_number,
+  data$c01_bank_routing_number <- sapply(data$c01_bank_routing_number,
                                          function(x) {
-                                           if (nchar(x)==7) paste("00", x, sep = "")
+                                           if (is.na(x)|is.null(x)) NA
+                                           else if (nchar(x)==7) paste("00", x, sep = "")
                                            else if (nchar(x)==8) paste("0", x, sep = "")
-                                           else if (x=="-0.01") "Blank_NULL"
-                                           else if (x=="-0.02") "Blank_NA"
+                                           else if (nchar(x)<=6) NA
                                            else x
                                          })
   
@@ -209,6 +213,7 @@ df_c01 <- FUNC_C01_Date_To_Days(df_c01)
 df_c01 <- FUNC_C01_Routing_Number(df_c01)
 df_c01 <- FUNC_C01_Census_Date(df_c01,census)
 colnames(df_c01)
+
 
 # C06 Data Cleaning Series
 FUNC_C06_Reason_Code_To_Level 
@@ -243,19 +248,25 @@ dim(perf)
 # FPD - First Payment Default
 y_FPD <- perf[perf$FirstPaymentDefault!="NULL",c("PortfolioID","Application_ID","FirstPaymentDefault")]
 colnames(y_FPD)[3] <- "y"
-# y_FPD <- as.character(y_FPD)
+y_FPD$y <- as.factor(as.character(y_FPD$y))
 
 # SPD - Second Payment Default
 y_SPD <- perf[perf$SecondPaymentDefault!="NULL",c("PortfolioID","Application_ID","SecondPaymentDefault")]
+colnames(y_SPD)[3] <- "y"
+y_SPD$y <- as.factor(as.character(y_SPD$y))
 
 # TPO - Total Paid Off
 perf$LoanStatusToDate <- as.character(perf$LoanStatusToDate)
 y_TPO <- perf[perf$LoanStatusToDate %in% c("N","K","W")==F,c("PortfolioID","Application_ID","LoanStatusToDate")]
-y_TPO[y_TPO$LoanStatusToDate %in% c("D","A"),"LoanStatusToDate"] <- 1
-y_TPO[y_TPO$LoanStatusToDate %in% c("D","A")==F,"LoanStatusToDate"] <- 0
+y_TPO[y_TPO$LoanStatusToDate %in% c("D","A"),"LoanStatusToDate"] <- "1"
+y_TPO[!y_TPO$LoanStatusToDate %in% c("1"),"LoanStatusToDate"] <- "0"
+colnames(y_TPO)[3] <- "y"
+y_TPO$y <- as.factor(y_TPO$y)
 
 # SWD - System With Draw
 y_SWD <- perf[,c("PortfolioID","Application_ID","SystemWithdrawn")]
+colnames(y_SWD)[3] <- "y"
+y_SWD$y <- as.factor(y_SWD$y)
 
 
 # CWD - With Draw Reason in detail
@@ -267,37 +278,89 @@ y_CWD <- perf[perf$SystemWithdrawn==0,c("PortfolioID","Application_ID","Withdraw
 y_CWD
 
 
+
 # ---------------------------------------------------------- #
 # Creating Vtreat objects and encoding selection
 # ---------------------------------------------------------- #
 
-# c01 vtreat and objects
-df_c01_y_FPD <- merge(df_c01,y_FPD,by=c("PortfolioID","Application_ID"))
-
-df_c01_y_FPD$ScoredDate <- NULL
-df_c01_y_FPD$Month <- format(df_c01_y_FPD$sys_ApplicationDate,"%m-%y")
-
-FUNC_Encode_Preparation <- function(data,att){
-  # data = df_c01_y_FPD
+FUNC_Encoding_Treatment <- function(data,att){
+  # Arg: This function take in raw data and dependent, treat them using vtreat
+  #      Return the vtreat object
   
-  encode1_name <- c(colnames(data)[colnames(data) %in% att[att$Encoding==1,]$variable_names],"y")
+  encode1_name <- colnames(data)[colnames(data) %in% att[att$Encoding==1,]$variable_names]
   encode2_name <- colnames(data)[colnames(data) %in% att[att$Encoding==2,]$variable_names]
+  encode3_name <- colnames(data)[colnames(data) %in% att[att$Encoding==3,]$variable_names]
   
   df1 <- apply(data[,encode1_name],2,as.character)
-  # dim(df1)
   df2 <- apply(data[,encode2_name],2,as.numeric)
-
-  df_out <- cbind(df1,df2)
+  df3 <- data[,encode3_name]
+  
+  df_out <- cbind(df1,df2,df3)
   return(df_out)
 }
 
-dim(df_x_c01_y_FPD)
-df_x_c01_y_FPD <- as.data.frame(df_x_c01_y_FPD)
-df_x_c01_y_FPD <- FUNC_Encode_Preparation(df_c01_y_FPD,att)
-colnames(df_x_c01_y_FPD)
+# c01 vtreat and objects
+df_x_c01 <- FUNC_Encoding_Treatment(df_c01,att)
+colnames(df_x_c01)
+df_x_c01_y_FPD <- merge(df_x_c01,y_FPD,by=c("PortfolioID","Application_ID"))
 
-df_x_c01_y_FPD$y
-cfe <- mkCrossFrameCExperiment(df_x_c01_y_FPD, colnames(df_x_c01_y_FPD)[1:length(colnames(df_x_c01_y_FPD))-1],'y')
+
+percent_string <- c(.3,.5,.2)
+seed_number <- 2018
+FUNC_Train_Valid_Test_Split <- function(data,seed_number,percent_string){
+  
+  set.seed(seed_number)
+  
+  df <- data
+  
+  fractionTraining   <- percent_string[1]
+  fractionValidation <- percent_string[2]
+  fractionTest       <- percent_string[3]
+  
+  # Compute sample sizes.
+  sampleSizeTraining   <- floor(fractionTraining   * nrow(df))
+  sampleSizeValidation <- floor(fractionValidation * nrow(df))
+  sampleSizeTest       <- floor(fractionTest       * nrow(df))
+  
+  # Create the randomly-sampled indices for the dataframe. Use setdiff() to
+  # avoid overlapping subsets of indices.
+  indicesTraining    <- sort(sample(seq_len(nrow(df)), size=sampleSizeTraining))
+  indicesNotTraining <- setdiff(seq_len(nrow(df)), indicesTraining)
+  indicesValidation  <- sort(sample(indicesNotTraining, size=sampleSizeValidation))
+  indicesTest        <- setdiff(indicesNotTraining, indicesValidation)
+  
+  # Finally, output the three dataframes for training, validation and test.
+  dfTraining   <- df[indicesTraining, ]
+  dfValidation <- df[indicesValidation, ]
+  dfTest       <- df[indicesTest, ]
+  
+  ind_list <- list(ind_train=indicesTraining,ind_valid=indicesValidation,ind_test=indicesTest)
+  
+  return(ind_list)
+}
+df_x_c01_y_FPD_Ind_List <- FUNC_Train_Valid_Test_Split(df_x_c01_y_FPD,seed_number,percent_string)
+df_x_c01_y_FPD_Train <- df_x_c01_y_FPD[df_x_c01_y_FPD_Ind_List$ind_train,]
+df_x_c01_y_FPD_Test <- df_x_c01_y_FPD[df_x_c01_y_FPD_Ind_List$ind_test,]
+df_x_c01_y_FPD_Valid <- df_x_c01_y_FPD[df_x_c01_y_FPD_Ind_List$ind_valid,]
+
+
+
+
+
+
+name_sys <- c("PortfolioID","Application_ID","sys_ApplicationDate")
+name_y <- c("y")
+name_vtreat <- colnames(df_x_c01_y_FPD_Train)[!colnames(df_x_c01_y_FPD_Train)%in%c(name_sys,name_y)]
+
+cfe <- mkCrossFrameCExperiment(df_x_c01_y_FPD_Train,name_vtreat,'y',1)
+df_x_c01_y_FPD_treatment <- cfe$treatments
+
+df_x_c01_y_FPD_Train_Treated <- prepare(df_x_c01_y_FPD_treatment,df_x_c01_y_FPD_Train,pruneSig = 0.99)
+df_x_c01_y_FPD_Test_Treated <- prepare(df_x_c01_y_FPD_treatment,df_x_c01_y_FPD_Test,pruneSig = 0.99)
+df_x_c01_y_FPD_Valid_Treated <- prepare(df_x_c01_y_FPD_treatment,df_x_c01_y_FPD_Valid,pruneSig = 0.99)
+colnames(df_x_c01_y_FPD_Train_Treated)
+
+
 df_x_c01_y_FPD$y = as.numeric(as.character(df_x_c01_y_FPD$y))
 
 
